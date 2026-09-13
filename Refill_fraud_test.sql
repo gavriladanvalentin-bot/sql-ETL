@@ -50,6 +50,12 @@ FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id) ON DELETE C
 );
 
 
+
+
+
+
+
+
 SELECT customer_id, COUNT (DISTINCT card_id) AS distinct_cards
 FROM transactions
 GROUP BY customer_id
@@ -82,7 +88,388 @@ WHERE transactions.customer_id = 495;
 
 
 
+
+
+SELECT customer_id, COUNT (DISTINCT card_id) AS distinct_cards, COUNT (fraud_confirmations.confirmed_at) AS confirmed
+FROM transactions
+LEFT JOIN fraud_confirmations
+ON transactions.transaction_id = fraud_confirmations.transaction_id
+GROUP BY customer_id
+ORDER BY distinct_cards DESC ;
+
+SELECT *
+FROM transactions
+LEFT JOIN fraud_confirmations
+ON transactions.transaction_id = fraud_confirmations.transaction_id
+WHERE customer_id = 183
+ORDER BY transactions.customer_id;
+
+
+SELECT customer_id, card_id
+FROM transactions
+WHERE card_id IN (
+    SELECT card_id 
+    FROM transactions
+    WHERE customer_id = 183
+)
+ORDER BY card_id, customer_id;
+
+
+SELECT card_id, customer_id
+FROM transactions
+WHERE card_id = 568
+GROUP BY card_id, customer_id;
+
+
+SELECT card_id, customer_id, fraud_confirmations.fraud_type 
+FROM transactions
+LEFT JOIN fraud_confirmations
+ON transactions.transaction_id = fraud_confirmations.transaction_id
+WHERE card_id = 568
+
+SELECT card_id, COUNT(DISTINCT customer_id) AS cust, COUNT (fraud_confirmations.fraud_type) AS confirmedfrd
+FROM transactions
+LEFT JOIN fraud_confirmations
+ON transactions.transaction_id = fraud_confirmations.transaction_id
+WHERE card_id = 568
+GROUP BY card_id;
+
+SELECT customer_id, device_id, ip_address
+FROM transactions
+WHERE card_id = 568;
+
+SELECT customer_id, card_id
+FROM transactions
+WHERE ip_address = '172.16.52.31';
+
+SELECT ip_address, COUNT(DISTINCT customer_id), COUNT(DISTINCT card_id)
+FROM transactions
+WHERE ip_address = '172.16.52.31'
+GROUP BY ip_address;
+
+SELECT ip_address, COUNT(DISTINCT customer_id) AS distinct_cust
+FROM transactions
+GROUP BY ip_address 
+HAVING COUNT(DISTINCT customer_id) > 1
+ORDER BY distinct_cust DESC;
+
+
+SELECT transaction_id, customer_id, amount, COUNT (*) OVER (PARTITION BY customer_id ) AS transnr
+FROM transactions
+ORDER BY transnr DESC;
+
+SELECT customer_id, transaction_id, created_at, ROW_NUMBER() OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS transnr
+FROM transactions
+ORDER BY customer_id, created_at ASC;
+
+SELECT customer_id, transaction_id, created_at, LAG(created_at) OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS previous_created_at
+FROM transactions
+ORDER BY customer_id, created_at ASC;
+
+
+
+SELECT customer_id, transaction_id, created_at, LAG(created_at) OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS previous_created_at, created_at - LAG(created_at) OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS time_dif
+FROM transactions
+ORDER BY customer_id, created_at ASC;
+
+SELECT customer_id, transaction_id, created_at, previous_created_at, created_at - previous_created_at AS time_diff
+FROM (
+    SELECT customer_id, transaction_id, created_at, LAG(created_at) OVER (PARTITION BY customer_id ORDER BY created_at ) AS previous_created_at
+    FROM transactions
+) AS x
+ORDER BY customer_id, created_at;
+
+
+SELECT customer_id, transaction_id, created_at, previous_created_at, time_dif
+FROM (
+SELECT customer_id, transaction_id, created_at, LAG(created_at) OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS previous_created_at, created_at - LAG(created_at) OVER (PARTITION BY  customer_id  ORDER BY  created_at  )  AS time_dif
+FROM transactions
+ORDER BY customer_id, created_at ASC
+) AS x
+WHERE x.time_dif < INTERVAL '5 minutes';
+
+
+SELECT 
+    customer_id, 
+    COUNT (*) AS total_tx, 
+    SUM (CASE WHEN transaction_status = 'approved' THEN 1 ELSE 0 END) AS approved_tx,
+    SUM (CASE WHEN transaction_status = 'declined' THEN 1 ELSE 0 END) AS declined_tx,
+    SUM (CASE WHEN three_ds_used = FALSE THEN 1 ELSE 0 END) AS no_3ds_tx
+FROM transactions
+GROUP BY customer_id
+ORDER BY total_tx DESC;
+
+
+
+WITH customer_summary AS (
+    SELECT 
+        customer_id, 
+        COUNT (*) AS total_tx, 
+        SUM (CASE WHEN transaction_status = 'approved' THEN 1 ELSE 0 END) AS approved_tx,
+        SUM (CASE WHEN transaction_status = 'declined' THEN 1 ELSE 0 END) AS declined_tx,
+        SUM (CASE WHEN three_ds_used = FALSE THEN 1 ELSE 0 END) AS no_3ds_tx
+    FROM transactions
+    GROUP BY customer_id
+)
+
+SELECT *
+FROM customer_summary
+WHERE total_tx > 15
+ORDER BY total_tx DESC;
+
+
+
+
+
+
+
+
+
+
+WITH customer_summary AS (
+    SELECT 
+        customer_id, 
+        COUNT (*) AS total_tx, 
+        SUM (CASE WHEN transaction_status = 'approved' THEN 1 ELSE 0 END) AS approved_tx,
+        SUM (CASE WHEN transaction_status = 'declined' THEN 1 ELSE 0 END) AS declined_tx,
+        SUM (CASE WHEN three_ds_used = FALSE THEN 1 ELSE 0 END) AS no_3ds_tx,
+        COUNT(DISTINCT card_id) AS distinct_cards, 
+        COUNT(DISTINCT ip_address) AS distinct_ips, 
+        COUNT(DISTINCT device_id) AS distinct_devices,
+        COUNT(fraud_confirmations.transaction_id) AS confirmed_fraud_count
+    FROM transactions
+    LEFT JOIN fraud_confirmations
+    ON transactions.transaction_id = fraud_confirmations.transaction_id
+    GROUP BY transactions.customer_id
+),
+
+card_summary AS (
+    SELECT
+        card_id, 
+        COUNT(DISTINCT customer_id) AS distinct_customers,
+        COUNT (*) AS total_tx, 
+        COUNT(fraud_confirmations.transaction_id) AS confirmed_fraud_count,
+        COUNT(DISTINCT ip_address) AS distinct_ips, 
+        COUNT(DISTINCT device_id) AS distinct_devices
+    FROM transactions
+    LEFT JOIN fraud_confirmations
+    ON transactions.transaction_id = fraud_confirmations.transaction_id
+    GROUP BY card_id
+),
+
+ip_summary AS (
+    SELECT
+        ip_address, 
+        COUNT(DISTINCT customer_id) AS distinct_customers,
+        COUNT(DISTINCT card_id) AS distinct_cards,
+        COUNT (*) AS total_tx, 
+        COUNT(fraud_confirmations.transaction_id) AS confirmed_fraud_count,
+        COUNT(DISTINCT device_id) AS distinct_devices
+    FROM transactions
+    LEFT JOIN fraud_confirmations
+    ON transactions.transaction_id = fraud_confirmations.transaction_id
+    GROUP BY ip_address
+),
+
+device_summary AS (
+    SELECT
+        device_id, 
+        COUNT(DISTINCT customer_id) AS distinct_customers,
+        COUNT(DISTINCT card_id) AS distinct_cards,
+        COUNT(DISTINCT ip_address) AS distinct_ips,
+        COUNT (*) AS total_tx, 
+        COUNT(fraud_confirmations.transaction_id) AS confirmed_fraud_count
+    FROM transactions
+    LEFT JOIN fraud_confirmations
+    ON transactions.transaction_id = fraud_confirmations.transaction_id
+    GROUP BY device_id
+),
+
+fraud_entities AS (
+
+SELECT
+    'CUSTOMER' AS entity_type,
+    customer_id::TEXT AS entity_value,
+    1 AS distinct_customers,
+    distinct_cards,
+    distinct_ips,
+    distinct_devices,
+    total_tx,
+    confirmed_fraud_count
+FROM customer_summary
+
+UNION ALL
+
+SELECT
+    'CARD' AS entity_type,
+    card_id::TEXT AS entity_value,
+    distinct_customers,
+    1 AS distinct_cards,
+    distinct_ips,
+    distinct_devices,
+    total_tx,
+    confirmed_fraud_count
+FROM card_summary
+
+UNION ALL
+
+SELECT
+    'IP' AS entity_type,
+    ip_address AS entity_value,
+    distinct_customers,
+    distinct_cards,
+    1 AS distinct_ips,
+    distinct_devices,
+    total_tx,
+    confirmed_fraud_count
+FROM ip_summary
+
+UNION ALL
+
+SELECT
+    'DEVICE' AS entity_type,
+    device_id AS entity_value,
+    distinct_customers,
+    distinct_cards,
+    distinct_ips,
+    1 AS distinct_devices,
+    total_tx,
+    confirmed_fraud_count
+FROM device_summary
+
+)
+SELECT
+    *,
+    ROUND(
+        confirmed_fraud_count::DECIMAL / NULLIF(total_tx, 0),
+        3
+    ) AS fraud_rate
+FROM fraud_entities
+WHERE confirmed_fraud_count > 0
+ORDER BY fraud_rate DESC, confirmed_fraud_count DESC;
+
+
+
+
+
+
+
+
+
+WITH export_transactions AS (
+    SELECT
+        transaction_id,
+        customer_id,
+        card_id,
+        device_id,
+        ip_address,
+
+        CASE
+            -- Păstrăm IP-urile pattern-urilor frauduloase exact cum sunt
+            WHEN ip_address LIKE '172.16.%'
+                THEN ip_address
+
+            -- Aproximativ 20% dintre tranzacțiile normale
+            -- folosesc un al doilea IP pentru același customer
+            WHEN transaction_id % 5 = 0
+                THEN
+                    '10.0.' ||
+                    (customer_id / 250)::INT || '.' ||
+                    ((customer_id % 250) + 1)::TEXT
+
+            -- IP-ul principal al customerului
+            ELSE
+                '192.168.' ||
+                (customer_id / 250)::INT || '.' ||
+                ((customer_id % 250) + 1)::TEXT
+        END AS export_ip
+
+    FROM transactions
+)
+
+-- 1. CUSTOMER -> CARD
+SELECT DISTINCT
+    'CUSTOMER_' || customer_id AS source,
+    'CARD_' || card_id AS target,
+    'uses_card' AS relationship
+FROM export_transactions
+WHERE customer_id IS NOT NULL
+  AND card_id IS NOT NULL
+
+UNION ALL
+
+-- 2. CUSTOMER -> IP
+SELECT DISTINCT
+    'CUSTOMER_' || customer_id AS source,
+    'IP_' || export_ip AS target,
+    'uses_ip' AS relationship
+FROM export_transactions
+WHERE customer_id IS NOT NULL
+  AND export_ip IS NOT NULL
+
+UNION ALL
+
+-- 3. CUSTOMER -> DEVICE
+SELECT DISTINCT
+    'CUSTOMER_' || customer_id AS source,
+    'DEVICE_' || device_id AS target,
+    'uses_device' AS relationship
+FROM export_transactions
+WHERE customer_id IS NOT NULL
+  AND device_id IS NOT NULL
+
+UNION ALL
+
+-- 4. CARD -> IP
+SELECT DISTINCT
+    'CARD_' || card_id AS source,
+    'IP_' || export_ip AS target,
+    'used_from_ip' AS relationship
+FROM export_transactions
+WHERE card_id IS NOT NULL
+  AND export_ip IS NOT NULL
+
+UNION ALL
+
+-- 5. CARD -> DEVICE
+SELECT DISTINCT
+    'CARD_' || card_id AS source,
+    'DEVICE_' || device_id AS target,
+    'used_on_device' AS relationship
+FROM export_transactions
+WHERE card_id IS NOT NULL
+  AND device_id IS NOT NULL
+
+UNION ALL
+
+-- 6. IP -> DEVICE
+SELECT DISTINCT
+    'IP_' || export_ip AS source,
+    'DEVICE_' || device_id AS target,
+    'ip_device' AS relationship
+FROM export_transactions
+WHERE export_ip IS NOT NULL
+  AND device_id IS NOT NULL;
+
+
+
+
+
+
+
+
+
+
+
+
+SELECT current_database();
+
 -- DROP TABLE fraud_confirmations;
+
+SELECT *
+FROM transactions
+LIMIT 100;
+
 
 SELECT *
 FROM fraud_confirmations
